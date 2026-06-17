@@ -1,7 +1,7 @@
 import streamlit as st
 import main
 
-st.set_page_config(page_title="TML Green CBTC", layout="wide")
+st.set_page_config(page_title="TML Green CBTC", layout="wide", initial_sidebar_state="collapsed")
 st.title("Train Energy Consumption Estimation")
 
 st.sidebar.header("Calculation Parameters")
