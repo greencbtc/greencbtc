@@ -14,7 +14,7 @@ st.caption("**Note: Please ensure your file name includes the trainset ID (e.g.,
 if file:
     df, is_sp1900 = main.preprocess(file)
     df, kwh, dist, kwh_km  = main.calculate_energy(df, is_sp1900, regen, eff)
-    main.export_results(df)
+    # main.export_results(df)
     
     cols = st.columns(4)
     train_name = "SP1900" if is_sp1900 else "TML C Train"
