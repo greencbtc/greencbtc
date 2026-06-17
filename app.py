@@ -6,7 +6,7 @@ st.title("Train Energy Consumption Estimation")
 
 st.sidebar.header("Calculation Parameters")
 eff = st.sidebar.number_input("Motor Efficiency", 0.0, 1.0, 0.80, 0.05)
-regen = st.sidebar.number_input("Regen Efficiency", 0.0, 1.0, 0.2, 0.05)
+regen = st.sidebar.number_input("Regen Efficiency", 0.0, 1.0, 0.20, 0.05)
 
 file = st.file_uploader("Upload your RTD .csv file", type="csv")
 st.caption("**Note: Please ensure your file name includes the trainset ID (e.g., T56).")
