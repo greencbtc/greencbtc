@@ -24,7 +24,7 @@ def preprocess(file_path):
 
     return df, is_sp1900
 
-def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8, mass_tons=480):
+def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8):
 
     time = pd.to_datetime(df['Name'])
     dt = 1 / df.groupby('Name')['Name'].transform('count')
@@ -34,22 +34,25 @@ def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8, mass_tons=480):
     distance_dt = (v/3.6) * dt
     distance = distance_dt.sum()/1000
     thrust = df['thrust'] / 100
-    resistance = 4160+(6.4*(mass_tons))+(0.14*(mass_tons)*v)+(0.96*v**2)
-    g_force = mass_tons * 1000 * 9.81 * np.sin(np.arctan(df['grade']))
 
     is_motoring = df['mode'] == "Motoring"
     is_braking = df['mode'] == "Braking"
 
     if is_sp1900:
-        fp = np.where(is_motoring, np.select([v<35, v<60, v<100, v>=100], [33, 50-v/2, 40-v/3, 175/15-v/20]) * 1000 * 16 * thrust, 0)   # force to motor the train mass to max acceleration 1m/ss in current speed
-        fb = np.where(is_braking, np.select([v<5, v<64, v>=64], [0, 26, 2240/v-12]) * 1000 * 16 * thrust, 0)    # force to brake the train mass to max deceleration 1m/ss in current speed
+        mass_tons = 460
+        fp = np.where(is_motoring, np.select([v<37, v<40, v<46, v<50, v<60, v<100, v>=100], [32, -5/9*v+470/9, -19/30*v+166/3, -11/20*v+103/2, -0.4*v+44, 150000/(v+3.43867)**2.15, 768.9811/(v+10)]) * 1000 * 16 * thrust, 0)   # force to motor the train mass to max acceleration 1m/ss in current speed
+        fb = np.where(is_braking, np.select([v<5, v<64, v>=64], [0, 25,  140000/(v+4.76177)**2.04]) * 1000 * 16 * thrust, 0)    # force to brake the train mass to max deceleration 1m/ss in current speed
     else:
+        mass_tons = 480
         fp = np.where(is_motoring, np.select([v<35,v<43,v<50,v<55,v>=55], [27, -0.625*v+48.875, -0.43*v+40.5, -0.3*v+33.99, 170000/(v+7.552235)**2.22]) * 1000 * 20 * thrust, 0)
         fb = np.where(is_braking, np.select([v<5,v<60,v>=60], [0, 25, 260000/(v+6.97678)**2.2]) * 1000 * 20 * thrust, 0)
 
+    resistance = 4160+(6.4*(mass_tons))+(0.14*(mass_tons)*v)+(0.96*v**2)
+    g_force = mass_tons * 1000 * 9.81 * np.sin(np.arctan(df['grade']))
+
     df['motor_J'] = np.where(is_motoring , (fp + resistance + g_force) / eff * distance_dt, 0)
     df['regen_J'] = np.where(is_braking , (-fb + resistance + g_force) * regen * distance_dt, 0)
-    df['energy_J'] = np.maximum(0, df['motor_J'])+ np.minimum(0, df['regen_J'])
+    df['energy_J'] = np.maximum(0 , df['motor_J'])+ np.minimum(0 , df['regen_J'])
 
     total_kwh = df['energy_J'].sum() / 3.6e6
 
@@ -74,7 +77,6 @@ def plot(df):
 
     fig.update_layout(title='Train Speed Profile ', xaxis_title='Time', yaxis_title='Speed (km/h)', hovermode='x unified', bargap=0,  template='plotly_white')
     return fig
-
 
 def export_results(df, output_path="energy_results.csv"):
     df.to_csv(output_path, index=False)
