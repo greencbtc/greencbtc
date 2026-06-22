@@ -35,11 +35,6 @@ def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8):
 
     v = df['velocity']
     distance_dt = (v/3.6) * dt
-    
-    # NEW: Calculate cumulative position along the track (in meters) and relative elevation
-    df['cum_distance_m'] = distance_dt.cumsum()
-    # dy = grade * dx (rise over run)
-    df['elevation_m'] = (df['grade'] * distance_dt).cumsum()
 
     distance = distance_dt.sum()/1000
     thrust = df['thrust'] / 100
