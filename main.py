@@ -38,14 +38,23 @@ def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8):
     is_motoring = df['mode'] == "Motoring"
     is_braking = df['mode'] == "Braking"
 
-    if is_sp1900:
-        mass_tons = 460
-        fp = np.where(is_motoring, np.select([v<37, v<40, v<46, v<50, v<60, v<100, v>=100], [32, -5/9*v+470/9, -19/30*v+166/3, -11/20*v+103/2, -0.4*v+44, 150000/(v+3.43867)**2.15, 838.8884/(v+20)]) * 1000 * 16 * thrust, 0) 
-        fb = np.where(is_braking, np.select([v<5, v<64, v>=64], [0, 25, 140000/(v+4.76177)**2.04]) * 1000 * 16 * thrust, 0) 
+    # if is_sp1900: #average
+    #     mass_tons = 460
+    #     fp = np.where(is_motoring, np.select([v<37, v<40, v<46, v<50, v<60, v<100, v>=100], [32, -5/9*v+470/9, -19/30*v+166/3, -11/20*v+103/2, -0.4*v+44, 150000/(v+3.43867)**2.15, 838.8884/(v+20)]) * 1000 * 16 * thrust, 0)
+    #     fb = np.where(is_braking, np.select([v<5, v<64, v>=64], [0, 25, 140000/(v+4.76177)**2.04]) * 1000 * 16 * thrust, 0) 
+    # else:
+    #     mass_tons = 480
+    #     fp = np.where(is_motoring, np.select([v<35,v<43,v<50,v<55,v>=55], [27, -0.625*v+48.875, -0.43*v+40.5, -0.3*v+33.99, 170000/(v+7.552235)**2.22]) * 1000 * 20 * thrust, 0)
+    #     fb = np.where(is_braking, np.select([v<5,v<60,v>=60], [0, 25, 260000/(v+6.97678)**2.2]) * 1000 * 20 * thrust, 0)
+
+    if is_sp1900:   #full load
+        mass_tons = 541.9
+        fp = np.where(is_motoring, np.select([v<33, v<40, v<46, v<50, v<60, v<100, v>=100], [37.24, -5/9*v+470/9, -19/30*v+166/3, -11/20*v+103/2, -0.4*v+44, 150000/(v+3.43867)**2.15, 838.8884/(v+20)]) * 1000 * 16 * thrust, 0)
+        fb = np.where(is_braking, np.select([v<5, v<60, v>=60], [0, 28.79, 140000/(v+4.76177)**2.04]) * 1000 * 16 * thrust, 0) 
     else:
-        mass_tons = 480
-        fp = np.where(is_motoring, np.select([v<35,v<43,v<50,v<55,v>=55], [27, -0.625*v+48.875, -0.43*v+40.5, -0.3*v+33.99, 170000/(v+7.552235)**2.22]) * 1000 * 20 * thrust, 0)
-        fb = np.where(is_braking, np.select([v<5,v<60,v>=60], [0, 25, 260000/(v+6.97678)**2.2]) * 1000 * 20 * thrust, 0)
+        mass_tons = 558.66
+        fp = np.where(is_motoring, np.select([v<31,v<35,v<43,v<50,v<55,v>=55], [30.82, -0.955*v+60.425, -0.625*v+48.875, -0.43*v+40.5, -0.3*v+33.99, 170000/(v+7.552235)**2.22]) * 1000 * 20 * thrust, 0)
+        fb = np.where(is_braking, np.select([v<5,v<55,v>=55], [0, 29.42, 260000/(v+6.97678)**2.2]) * 1000 * 20 * thrust, 0)
 
     resistance = 4160+(6.4*(mass_tons))+(0.14*(mass_tons)*v)+(0.96*v**2)
     g_force = mass_tons * 1000 * 9.81 * np.sin(np.arctan(df['grade']))
@@ -77,7 +86,6 @@ def plot(df):
 
     fig.update_layout(title='Train Speed Profile ', xaxis_title='Time', yaxis_title='Speed (km/h)', hovermode='x unified', bargap=0,  template='plotly_white')
     return fig
-
 
 def export_results(df, output_path="energy_results.csv"):
     df.to_csv(output_path, index=False)
