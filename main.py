@@ -1,12 +1,15 @@
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import re
 
 def preprocess(file_path):
     df = pd.read_csv(file_path, skiprows=[0, 2])
     
-    train_set = int(re.search(r'T(\d+)', file_path.name).group(1))
+    name_attr = getattr(file_path, 'name', str(file_path))
+    match = re.search(r'T(\d+)', name_attr)
+    train_set = int(match.group(1)) if match else 99 
     is_sp1900 = train_set <= 48
     
     def hex_to_dec(series):
@@ -32,20 +35,17 @@ def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8):
 
     v = df['velocity']
     distance_dt = (v/3.6) * dt
+    
+    # NEW: Calculate cumulative position along the track (in meters) and relative elevation
+    df['cum_distance_m'] = distance_dt.cumsum()
+    # dy = grade * dx (rise over run)
+    df['elevation_m'] = (df['grade'] * distance_dt).cumsum()
+
     distance = distance_dt.sum()/1000
     thrust = df['thrust'] / 100
 
     is_motoring = df['mode'] == "Motoring"
     is_braking = df['mode'] == "Braking"
-
-    # if is_sp1900: #Average
-    #     mass_tons = 460
-    #     fp = np.where(is_motoring, np.select([v<37, v<40, v<46, v<50, v<60, v<100, v>=100], [32, -5/9*v+470/9, -19/30*v+166/3, -11/20*v+103/2, -0.4*v+44, 150000/(v+3.43867)**2.15, 838.8884/(v+20)]) * 1000 * 16 * thrust, 0)
-    #     fb = np.where(is_braking, np.select([v<5, v<64, v>=64], [0, 25, 140000/(v+4.76177)**2.04]) * 1000 * 16 * thrust, 0) 
-    # else:
-    #     mass_tons = 480
-    #     fp = np.where(is_motoring, np.select([v<35,v<43,v<50,v<55,v>=55], [27, -0.625*v+48.875, -0.43*v+40.5, -0.3*v+33.99, 170000/(v+7.552235)**2.22]) * 1000 * 20 * thrust, 0)
-    #     fb = np.where(is_braking, np.select([v<5,v<60,v>=60], [0, 25, 260000/(v+6.97678)**2.2]) * 1000 * 20 * thrust, 0)
 
     if is_sp1900:   #Full load
         mass_tons = 541.9
@@ -64,27 +64,45 @@ def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8):
     df['energy_J'] = np.maximum(0 , df['motor_J'])+ np.minimum(0 , df['regen_J'])
 
     total_kwh = df['energy_J'].sum() / 3.6e6
-
     kwh_carkm = total_kwh / (distance*8)
 
     return df, total_kwh, distance, kwh_carkm
 
 def plot(df):
-    fig = go.Figure()
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.05, 
+                        subplot_titles=('Train Speed Profile', 'Track Gradient Profile'))
 
-    fig.add_trace(go.Scatter(x=df['time'], y=df['commanded'],mode='lines', name='Commanded',line=dict(color='blue', width=1, shape='hv'), hoverinfo='skip'))
+    fig.add_trace(go.Scatter(x=df['time'], y=df['commanded'], mode='lines', name='Commanded',
+                             line=dict(color='blue', width=1, shape='hv'), hoverinfo='skip'), row=1, col=1)
 
     colors = {'Motoring': 'orange', 'Coasting': 'green', 'Braking': 'yellow', 'Stopped': 'lightgray'}
-    
     for mode in colors.keys():
         df_mode = df[df['mode'] == mode]
         if not df_mode.empty:
-            fig.add_trace(go.Bar(x=df_mode['time'], y=df_mode['velocity'],name=f'{mode}',marker=dict(color=colors[mode], line=dict(width=0)),width=360, 
-                customdata=df_mode[['Name', 'thrust', 'energy_J', 'mode', 'commanded', 'grade']],
-                hovertemplate= "<b>Time:</b> %{customdata[0]}<br>" + "<b>Mode:</b> %{customdata[3]}<br>" + "<b>Commanded Speed:</b> %{customdata[4]:.1f} km/h<br>" + "<b>Speed:</b> %{y:.1f} km/h<br>" 
-                + "<b>Thrust:</b> %{customdata[1]:.1f}%<br>" + "<b>Grade:</b> %{customdata[5]:.5f} <br>" + "<b>Energy:</b> %{customdata[2]:.2f} J<br>" + "<extra></extra>"))
+            fig.add_trace(go.Bar(x=df_mode['time'], y=df_mode['velocity'], name=f'{mode}',
+                                 marker=dict(color=colors[mode], line=dict(width=0)), width=360, 
+                                 customdata=df_mode[['Name', 'thrust', 'energy_J', 'mode', 'commanded', 'grade']],
+                                 hovertemplate="<b>Time:</b> %{customdata[0]}<br>" + "<b>Mode:</b> %{customdata[3]}<br>" + "<b>Commanded Speed:</b> %{customdata[4]:.1f} km/h<br>" + "<b>Speed:</b> %{y:.1f} km/h<br>" 
+                                 + "<b>Thrust:</b> %{customdata[1]:.1f}%<br>" + "<b>Grade:</b> %{customdata[5]:.5f} <br>" + "<b>Energy:</b> %{customdata[2]:.2f} J<br>" + "<extra></extra>"), row=1, col=1)
 
-    fig.update_layout(title='Train Speed Profile ', xaxis_title='Time', yaxis_title='Speed (km/h)', hovermode='x unified', bargap=0,  template='plotly_white')
+    fig.add_trace(go.Scatter(
+        x=df['time'], 
+        y=df['grade'], 
+        mode='lines', 
+        name='Grade',
+        line=dict(color='darkgray', width=1.5, shape='hv'),
+        fill='tozeroy', 
+        fillcolor='rgba(169, 169, 169, 0.3)',
+        hovertemplate="<b>Time:</b> %{x}<br>" + "<b>Gradient:</b> %{y:.5f} (%{y:.2%})<br><extra></extra>"
+    ), row=2, col=1)
+
+    # Update Layout
+    fig.update_layout(height=700, hovermode='x unified', bargap=0, template='plotly_white', showlegend=True)
+    fig.update_yaxes(title_text="Speed (km/h)", row=1, col=1)
+    fig.update_yaxes(title_text="Gradient", row=2, col=1)
+    fig.update_xaxes(title_text="Time", row=2, col=1)
+    
     return fig
 
 def export_results(df, output_path="energy_results.csv"):
