@@ -65,7 +65,7 @@ def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8):
 
 def plot(df):
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                        vertical_spacing=0.05, 
+                        vertical_spacing=0.2, 
                         subplot_titles=('Train Speed Profile', 'Track Gradient Profile'))
 
     fig.add_trace(go.Scatter(x=df['time'], y=df['commanded'], mode='lines', name='Commanded',
@@ -81,22 +81,15 @@ def plot(df):
                                  hovertemplate="<b>Time:</b> %{customdata[0]}<br>" + "<b>Mode:</b> %{customdata[3]}<br>" + "<b>Commanded Speed:</b> %{customdata[4]:.1f} km/h<br>" + "<b>Speed:</b> %{y:.1f} km/h<br>" 
                                  + "<b>Thrust:</b> %{customdata[1]:.1f}%<br>" + "<b>Grade:</b> %{customdata[5]:.5f} <br>" + "<b>Energy:</b> %{customdata[2]:.2f} J<br>" + "<extra></extra>"), row=1, col=1)
 
-    fig.add_trace(go.Scatter(
-        x=df['time'], 
-        y=df['grade'], 
-        mode='lines', 
-        name='Grade',
-        line=dict(color='darkgray', width=1.5, shape='hv'),
-        fill='tozeroy', 
-        fillcolor='rgba(169, 169, 169, 0.3)',
-        hovertemplate="<b>Time:</b> %{x}<br>" + "<b>Gradient:</b> %{y:.5f} (%{y:.2%})<br><extra></extra>"
-    ), row=2, col=1)
+    fig.add_trace(go.Scatter(x=df['time'], y=df['grade'], mode='lines', name='Grade',line=dict(color='darkgray', width=1.5, shape='hv'),
+        fill='tozeroy', fillcolor='rgba(169, 169, 169, 0.3)',hovertemplate="<b>Time:</b> %{x}<br>" + "<b>Gradient:</b> %{y:.5f} (%{y:.2%})<br><extra></extra>"), row=2, col=1)
 
     # Update Layout
-    fig.update_layout(height=700, hovermode='x unified', bargap=0, template='plotly_white', showlegend=True)
+    fig.update_layout(height=800, hovermode='x unified', bargap=0, template='plotly_white', showlegend=True)
     fig.update_yaxes(title_text="Speed (km/h)", row=1, col=1)
     fig.update_yaxes(title_text="Gradient", row=2, col=1)
-    fig.update_xaxes(title_text="Time", row=2, col=1)
+    fig.update_xaxes(title=dict(text="Time", standoff=0), showticklabels=True, row=1, col=1)
+    fig.update_xaxes(title=dict(text="Time", standoff=0), showticklabels=True, row=2, col=1)
     
     return fig
 
