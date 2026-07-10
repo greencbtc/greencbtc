@@ -28,7 +28,6 @@ def preprocess(file_path):
     return df, is_sp1900
 
 def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8):
-
     time = pd.to_datetime(df['Name'])
     dt = 1 / df.groupby('Name')['Name'].transform('count')
     df['time'] = time + pd.to_timedelta(df.groupby('Name').cumcount() * dt, unit='s')
@@ -38,41 +37,113 @@ def calculate_energy(df, is_sp1900, regen=0.2, eff=0.8):
 
     distance = distance_dt.sum()/1000
     thrust = df['thrust'] / 100
+    thrust_active = thrust > 0.1
 
     is_motoring = df['mode'] == "Motoring"
     is_braking = df['mode'] == "Braking"
 
-    # if is_sp1900: #Average
-    #     mass_tons = 460
-    #     fp = np.where(is_motoring, np.select([v<37, v<40, v<46, v<50, v<60, v<100, v>=100], [32, -5/9*v+470/9, -19/30*v+166/3, -11/20*v+103/2, -0.4*v+44, 150000/(v+3.43867)**2.15, 838.8884/(v+20)]) * 1000 * 16 * thrust, 0)
-    #     fb = np.where(is_braking, np.select([v<5, v<64, v>=64], [0, 25, 140000/(v+4.16486)**2.04]) * 1000 * 16 * thrust, 0) 
-    # else:
-    #     mass_tons = 480
-    #     fp = np.where(is_motoring, np.select([v<35,v<43,v<50,v<55,v>=55], [27, -0.625*v+48.875, -0.43*v+40.5, -0.3*v+33.99, 170000/(v+7.552235)**2.22]) * 1000 * 20 * thrust, 0)
-    #     fb = np.where(is_braking, np.select([v<5,v<60,v>=60], [0, 25, 260000/(v+6.97678)**2.2]) * 1000 * 20 * thrust, 0)
-
     if is_sp1900:   #Full load
         mass_tons = 541.9
-        fp = np.where(is_motoring, np.select([v<32.5, v<40, v<46, v<50, v<60, v<100, v>=100], [37.24, -5/9*v+470/9, -19/30*v+166/3, -11/20*v+103/2, -0.4*v+44, 150000/(v+3.43867)**2.15, 838.8884/(v+20)]) * 1000 * 16 * thrust, 0)
-        fb = np.where(is_braking, np.select([v<5, v<60, v>=60], [0, 28.79, 140000/(v+2.87546)**2.05]) * 1000 * 16 * thrust, 0) 
+        fp = np.where(is_motoring & thrust_active, np.select([v<32, v<35, v<40, v<46, v<50, v<60, v<100, v>=100], [37.24, -1.117*v+73, -7/9*v+550/9, -19/30*v+166/3, -11/20*v+103/2, -0.4*v+44, 150000/(v+3.43867)**2.15, 838.8884/(v+20)]) * 1000 * 16 * thrust, 0)
+        fb = np.where(is_braking & thrust_active, np.select([v<5, v<60, v>=60], [0, 28.79, 140000/(v+2.87546)**2.05]) * 1000 * 16 * thrust, 0) 
     else:
         mass_tons = 558.66
-        fp = np.where(is_motoring, np.select([v<31,v<35,v<43,v<50,v<55,v>=55], [30.82, -0.955*v+60.4425, -0.625*v+48.875, -0.43*v+40.5, -0.3*v+33.99, 170000/(v+7.552235)**2.22]) * 1000 * 20 * thrust, 0)
-        fb = np.where(is_braking, np.select([v<5,v<55,v>=55], [0, 29.42, 260000/(v+6.97678)**2.2]) * 1000 * 20 * thrust, 0)
+        fp = np.where(is_motoring & thrust_active, np.select([v<31,v<35,v<43,v<50,v<55,v>=55], [30.82, -0.955*v+60.4425, -0.625*v+48.875, -0.43*v+40.5, -0.3*v+33.99, 170000/(v+7.552235)**2.22]) * 1000 * 20 * thrust, 0)
+        fb = np.where(is_braking & thrust_active, np.select([v<5,v<55,v>=55], [0, 29.42, 260000/(v+6.97678)**2.2]) * 1000 * 20 * thrust, 0)
 
     resistance = 4160+(6.4*(mass_tons))+(0.14*(mass_tons)*v)+(0.96*v**2)
     g_force = mass_tons * 1000 * 9.81 * np.sin(np.arctan(df['grade']))
 
     df['motor_J'] = np.where(is_motoring , (fp + resistance + g_force) / eff * distance_dt, 0)
     df['regen_J'] = np.where(is_braking , (-fb + resistance + g_force) * regen * distance_dt, 0)
-    df['energy_J'] = np.maximum(0 , df['motor_J'])+ np.minimum(0 , df['regen_J'])
+    df['energy_J'] = np.maximum(0 , df['motor_J'])+ np.minimum(0, df['regen_J'])
 
     total_kwh = df['energy_J'].sum() / 3.6e6
     kwh_carkm = total_kwh / (distance*8)
 
     return df, total_kwh, distance, kwh_carkm
 
+def extract_multifactor_inefficiencies(df, lookahead_seconds=12, sampling_rate_hz=2, min_energy_threshold_kwh=1.0):
+    """
+    Advanced multi-factor analysis to isolate precise regions of wasted motoring.
+    
+    CRITICAL REVISION: Completely excludes pre-coast transitions since reaching 
+    commanded speed and transitioning to coasting is correct, intended software logic.
+    
+    Targets absolute high-ROI structural contradictions:
+    1. Motoring immediately before an upcoming station/terminal stop.
+    2. Motoring right before a structural braking profile.
+    3. Heavy downhill over-propulsion where gravity should handle acceleration.
+    """
+    df = df.sort_values(by='time').copy()
+    lookahead_rows = int(lookahead_seconds * sampling_rate_hz)
+    
+    # --- 1. FEATURE ENGINEERING & DERIVATIVES ---
+    df['cmd_change'] = df['commanded'].diff()
+    df['target_gap'] = df['commanded'] - df['velocity']
+    
+    # Lookahead arrays for future states
+    future_modes = df['mode'].shift(-lookahead_rows, fill_value='Stopped')
+    
+    # Check if a true station stop or a braking phase is coming down the line
+    df['upcoming_stop'] = (future_modes == 'Stopped') | (df['velocity'].rolling(window=lookahead_rows).min().shift(-lookahead_rows) == 0)
+    df['upcoming_braking'] = (future_modes == 'Braking')
+    
+    # --- 2. ULTRA-STRICT WASTE CRITERIA ---
+    
+    # FACTOR A: Terminal Motoring Malpractice (Motoring directly into a station stop)
+    # The train motors near a terminal platform where it must come to a dead stop.
+    cond_terminal_motoring = (
+        df['upcoming_stop'] & 
+        (df['mode'] == 'Motoring') & 
+        (df['velocity'] > 2.0)  # Exclude micro-adjustments/clamping at 0 km/h
+    )
+    
+    # FACTOR B: Redundant Pre-Braking Propulsion (Energy instantly wiped out by brakes)
+    # Active motoring immediately before the system triggers a Braking state.
+    # Placing a speed restriction here smoothly slides the train directly into an early coast.
+    cond_pre_brake_waste = (
+        (df['mode'] == 'Motoring') & 
+        df['upcoming_braking'] & 
+        (df['target_gap'] < 4.0)  # The train is already running close to the limit
+    )
+    
+    # FACTOR C: Topographic Over-Propulsion (Fighting Gravitational Momentum)
+    # Motoring down a steep incline where gravity provides natural acceleration, 
+    # but the train keeps motoring despite already matching the commanded target speed.
+    high_speed_floor = df['velocity'].quantile(0.75) if len(df) > 0 else 70.0
+    cond_topographic_waste = (
+        (df['mode'] == 'Motoring') &
+        (df['grade'] <= -0.01) &        # Significant downhill gradient
+        (df['velocity'] >= high_speed_floor) & 
+        (df['target_gap'] < 2.5)         # Already cruising right at the limit
+    )
+
+    # Combine only these genuine high-waste conditions
+    df['is_candidate'] = cond_terminal_motoring | cond_pre_brake_waste | cond_topographic_waste
+    df['is_inefficient'] = False 
+    
+    if not df['is_candidate'].any():
+        return df
+
+    # --- 3. CLUSTER QUANTITATIVE VALIDATION (ROI CHECK) ---
+    # Group continuous rows to isolate explicit events
+    df['block'] = (df['is_candidate'] != df['is_candidate'].shift()).cumsum()
+    
+    for block_id, group in df[df['is_candidate']].groupby('block'):
+        # Total energy consumed (Joules) converted to kWh for this specific event window
+        total_block_kwh = group['motor_J'].sum() / 3.6e6
+        
+        # High-ROI Check: Only highlight if enforcing a speed restriction here 
+        # eliminates a major energy surge (e.g., minimum 1.0 kWh saved per event)
+        if total_block_kwh >= min_energy_threshold_kwh:
+            df.loc[df['block'] == block_id, 'is_inefficient'] = True
+            
+    return df
+
 def plot(df):
+    df = extract_multifactor_inefficiencies(df, min_energy_threshold_kwh=1.0) # Adjust threshold here (e.g., 1.0 kWh minimum save)
+
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                         vertical_spacing=0.2, 
                         subplot_titles=('Train Speed Profile', 'Track Gradient Profile'))
@@ -92,6 +163,31 @@ def plot(df):
 
     fig.add_trace(go.Scatter(x=df['time'], y=df['grade'], mode='lines', name='Grade',line=dict(color='darkgray', width=1.5, shape='hv'),
         fill='tozeroy', fillcolor='rgba(169, 169, 169, 0.3)',hovertemplate="<b>Time:</b> %{x}<br>" + "<b>Gradient:</b> %{y:.5f} (%{y:.2%})<br><extra></extra>"), row=2, col=1)
+
+    # --- DYNAMIC INEFFICIENCY HIGHLIGHTING BLOCKS ---
+    if 'is_inefficient' in df.columns and df['is_inefficient'].any():
+        df['final_block'] = (df['is_inefficient'] != df['is_inefficient'].shift()).cumsum()
+        flagged_groups = df[df['is_inefficient']].groupby('final_block')
+        
+        for _, group in flagged_groups:
+            start_t = group['time'].min()
+            end_t = group['time'].max()
+            
+            fig.add_vrect(
+                x0=start_t, x1=end_t,
+                fillcolor="red", opacity=0.18,
+                layer="below", line_width=0,
+                row="all",
+                showlegend=False
+            )
+
+        fig.add_trace(go.Scatter(
+            x=[df['time'].iloc[0]], y=[None],
+            mode='markers',
+            marker=dict(color="red", symbol="square", size=10, opacity=0.18),
+            name="ROI Inefficient Motoring",
+            showlegend=True
+        ), row=1, col=1)
 
     # Update Layout
     fig.update_layout(height=800, hovermode='x unified', bargap=0, template='plotly_white', showlegend=True)
